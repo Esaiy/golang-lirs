@@ -1,2 +1,2 @@
 # golang-lirs
-LIRS cache replacement policy using Go.
+LIRS cache replacement policy implementation using Go.
