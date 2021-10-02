@@ -15,7 +15,7 @@ import (
 var (
 	// HIRSize      int = 1
 	hit, miss        = 0, 0
-	cacheSize    int = 500000
+	cacheSize    int = 900000
 	LIRSize      int = cacheSize * 99 / 100
 	HIRSize      int = cacheSize / 100
 	orderedStack     = orderedmap.NewOrderedMap()
@@ -72,6 +72,15 @@ func lirs(line string) {
 	if len(LIR) < LIRSize {
 		miss += 1
 		// fmt.Println("---miss---")
+		if _, ok := LIR[blockNum]; ok {
+			miss -= 1
+			hit += 1
+			key, _, _ := orderedStack.GetFirst()
+			keyInInt, _ := strconv.Atoi(key.(string))
+			if keyInInt == blockNum {
+				stackPrunning(false)
+			}
+		}
 		addToStack(blockNum)
 		makeLIR(blockNum)
 		return
@@ -110,12 +119,13 @@ func lirs(line string) {
 			removeFromList(keyInInt)
 		}
 
+		addToList(blockNum)
 		if _, ok := orderedStack.Get(strconv.Itoa(blockNum)); ok {
 			makeLIR(blockNum)
+			removeFromList(blockNum)
 			stackPrunning(true)
 		} else {
 			makeHIR(blockNum)
-			addToList(blockNum)
 		}
 		addToStack(blockNum)
 	}
@@ -192,14 +202,6 @@ func printList() {
 	fmt.Printf("List : ")
 	for k, _, ok := iter.Next(); ok; k, _, ok = iter.Next() {
 		fmt.Printf("%v ", k)
-	}
-	fmt.Println()
-}
-
-func printCache() {
-	fmt.Printf("Cache : ")
-	for key, _ := range cache {
-		fmt.Printf("%v ", key)
 	}
 	fmt.Println()
 }
