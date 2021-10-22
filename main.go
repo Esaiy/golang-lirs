@@ -6,202 +6,73 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
-	"time"
+	"sync"
 
-	"github.com/secnot/orderedmap"
-)
-
-var (
-	// HIRSize      int = 1
-	hit, miss        = 0, 0
-	cacheSize    int = 900000
-	LIRSize      int = cacheSize * 99 / 100
-	HIRSize      int = cacheSize / 100
-	orderedStack     = orderedmap.NewOrderedMap()
-	orderedList      = orderedmap.NewOrderedMap()
-	LIR              = make(map[int]int)
-	HIR              = make(map[int]int)
+	"github.com/esaiy/golang-lirs/lirs"
 )
 
 func main() {
-	var (
-		start    = time.Now()
-		filePath = "./data/web1_input.txt"
-		// filePath = "./data/test_input.txt"
-	)
+	var filePath string
+	var cacheList []int
+	var wg sync.WaitGroup
 
-	fmt.Println(LIRSize, HIRSize)
+	if len(os.Args) < 3 {
+		fmt.Println("program [file] [cachesize]...")
+		os.Exit(1)
+	}
 
-	var file, err = os.Open(filePath)
+	filePath = os.Args[1]
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		fmt.Printf("%v does not exists\n", filePath)
+		os.Exit(1)
+	}
+
+	cacheList = checkCacheSize(os.Args[2:])
+
+	for i := 2; i < len(os.Args); i++ {
+		cacheSize, err := strconv.Atoi(os.Args[i])
+		if err != nil {
+			fmt.Printf("%v not an int\n", os.Args[i])
+			os.Exit(1)
+		}
+		wg.Add(1)
+		go lirs.LIRS(filePath, cacheSize, 1, &wg)
+		fmt.Println(filePath, cacheSize, cacheList)
+	}
+	wg.Wait()
+}
+
+func checkCacheSize(cacheSize []string) []int {
+	var cacheList []int
+	for _, size := range cacheSize {
+		cache, err := strconv.Atoi(size)
+		if err != nil {
+			fmt.Printf("%v not an int\n", size)
+			os.Exit(1)
+		}
+		cacheList = append(cacheList, cache)
+
+	}
+	return cacheList
+}
+
+func readFile(i int, filePath string, wg *sync.WaitGroup) {
+	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		lirs(scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
-	}
-
-	var duration = time.Since(start)
-
-	fmt.Println("List size :", orderedList.Len())
-	fmt.Println("Stack size :", orderedStack.Len())
-	fmt.Printf("HIT : %v\nMISS : %v\nHIT RATE : %v\n", hit, miss, float32(hit)/float32((hit+miss)))
-	fmt.Printf("Duration : %v\n", duration.Seconds())
-}
-
-func lirs(line string) {
-	var block = (strings.Split(line, ","))[0]
-	// fmt.Printf("-------\nCurrent key : %v\n", block)
-	// printStack()
-	// printList()
-	// printCache()
-
-	var blockNum, err = strconv.Atoi(block)
+	fWrite, err := os.Create(strconv.Itoa(i) + ".txt")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer fWrite.Close()
 
-	if len(LIR) < LIRSize {
-		miss += 1
-		// fmt.Println("---miss---")
-		if _, ok := LIR[blockNum]; ok {
-			miss -= 1
-			hit += 1
-			key, _, _ := orderedStack.GetFirst()
-			keyInInt, _ := strconv.Atoi(key.(string))
-			if keyInInt == blockNum {
-				stackPrunning(false)
-			}
-		}
-		addToStack(blockNum)
-		makeLIR(blockNum)
-		return
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		fWrite.WriteString(scanner.Text() + "\n")
 	}
-
-	if _, ok := LIR[blockNum]; ok {
-		hit += 1
-		// fmt.Println("---HIT---")
-		key, _, _ := orderedStack.GetFirst()
-		keyInInt, _ := strconv.Atoi(key.(string))
-		if keyInInt == blockNum {
-			stackPrunning(false)
-		}
-		addToStack(blockNum)
-		return
-	}
-
-	if _, ok := orderedList.Get(strconv.Itoa(blockNum)); ok {
-		hit += 1
-		// fmt.Println("---hit---")
-		if _, ok := orderedStack.Get(strconv.Itoa(blockNum)); ok {
-			makeLIR(blockNum)
-			removeFromList(blockNum)
-			stackPrunning(true)
-		} else {
-			addToList(blockNum)
-		}
-		addToStack(blockNum)
-		return
-	} else {
-		miss += 1
-		// fmt.Println("---MISS---")
-		if orderedList.Len() == HIRSize {
-			key, _, _ := orderedList.PopLast()
-			keyInInt, _ := strconv.Atoi(key.(string))
-			removeFromList(keyInInt)
-		}
-
-		addToList(blockNum)
-		if _, ok := orderedStack.Get(strconv.Itoa(blockNum)); ok {
-			makeLIR(blockNum)
-			removeFromList(blockNum)
-			stackPrunning(true)
-		} else {
-			makeHIR(blockNum)
-		}
-		addToStack(blockNum)
-	}
-
-}
-
-func addToStack(block int) {
-	key := strconv.Itoa(block)
-	if _, ok := orderedStack.Get(key); ok {
-		orderedStack.MoveLast(key)
-		return
-	}
-	orderedStack.Set(key, 1)
-}
-
-func addToList(block int) {
-	key := strconv.Itoa(block)
-	if orderedList.Len() == HIRSize {
-		orderedList.PopLast()
-	}
-	orderedList.Set(key, 1)
-	orderedList.MoveFirst(key)
-}
-
-func removeFromList(block int) {
-	key := strconv.Itoa(block)
-	orderedList.Delete(key)
-}
-
-func makeLIR(block int) {
-	LIR[block] = 1
-	removeFromList(block)
-	delete(HIR, block)
-}
-
-func makeHIR(block int) {
-	HIR[block] = 1
-	delete(LIR, block)
-}
-
-func stackPrunning(removeLIR bool) {
-	key, _, _ := orderedStack.PopFirst()
-	keyInInt, _ := strconv.Atoi(key.(string))
-	if removeLIR {
-		makeHIR(keyInInt)
-		if orderedList.Len() == HIRSize {
-			orderedList.PopLast()
-		}
-		orderedList.Set(key, 1)
-		orderedList.MoveFirst(key)
-	}
-
-	iter := orderedStack.Iter()
-	for k, _, ok := iter.Next(); ok; k, _, ok = iter.Next() {
-		keyInInt, _ := strconv.Atoi(k.(string))
-		if _, ok := LIR[keyInInt]; ok {
-			break
-		}
-		orderedStack.PopFirst()
-	}
-}
-
-func printStack() {
-	iter := orderedStack.Iter()
-	fmt.Printf("Stack : ")
-	for k, _, ok := iter.Next(); ok; k, _, ok = iter.Next() {
-		fmt.Printf("%v ", k)
-	}
-	fmt.Println()
-}
-
-func printList() {
-	iter := orderedList.Iter()
-	fmt.Printf("List : ")
-	for k, _, ok := iter.Next(); ok; k, _, ok = iter.Next() {
-		fmt.Printf("%v ", k)
-	}
-	fmt.Println()
+	wg.Done()
 }
