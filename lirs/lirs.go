@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/esaiy/golang-lirs/simulator"
@@ -47,55 +46,6 @@ func NewLIRS(cacheSize, HIRSize int) *LIRS {
 	}
 }
 
-// func ssss(filePath string, totalCacheSize, hirPercentSize int, wg *sync.WaitGroup) error {
-// 	LIRSObject := LIRS{
-// 		cacheSize:    totalCacheSize,
-// 		LIRSize:      totalCacheSize * 99 / 100,
-// 		HIRSize:      totalCacheSize / 100,
-// 		hit:          0,
-// 		miss:         0,
-// 		writeCount:   0,
-// 		orderedStack: orderedmap.NewOrderedMap(),
-// 		orderedList:  orderedmap.NewOrderedMap(),
-// 		LIR:          make(map[interface{}]int, totalCacheSize),
-// 		HIR:          make(map[interface{}]int, totalCacheSize),
-// 	}
-
-// 	start := time.Now()
-
-// 	file, err := os.Open(filePath)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer file.Close()
-
-// 	scanner := bufio.NewScanner(file)
-
-// 	for scanner.Scan() {
-// 		LIRSObject.get(scanner.Text())
-// 	}
-
-// 	if err := scanner.Err(); err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	duration := time.Since(start)
-
-// 	hitRatio := 100 * float32(float32(LIRSObject.hit)/float32(LIRSObject.hit+LIRSObject.miss))
-
-// 	fmt.Println("_______________________________________________________")
-// 	fmt.Println("LIRS")
-// 	fmt.Printf("cache size : %v\ncache hit : %v\ncache miss : %v\nhit ratio : %v\n", LIRSObject.cacheSize, LIRSObject.hit, LIRSObject.miss, hitRatio)
-// 	fmt.Println("list size :", LIRSObject.orderedList.Len())
-// 	fmt.Println("stack size :", LIRSObject.orderedStack.Len())
-// 	fmt.Println("write count :", LIRSObject.writeCount)
-// 	fmt.Printf("duration : %v\n", duration.Seconds())
-// 	fmt.Printf("!LIRS|%v|%v|%v|\n", LIRSObject.cacheSize, LIRSObject.hit, LIRSObject.hit+LIRSObject.miss)
-
-// 	wg.Done()
-// 	return nil
-// }
-
 func (LIRSObject *LIRS) Get(trace simulator.Trace) (err error) {
 	block := trace.Addr
 	op := trace.Op
@@ -119,12 +69,12 @@ func (LIRSObject *LIRS) Get(trace simulator.Trace) (err error) {
 	if _, ok := LIRSObject.LIR[block]; ok {
 		// hit, block is in LIR
 		LIRSObject.handleLIRBlock(block)
-	} else if _, ok := LIRSObject.orderedList.Get(strconv.Itoa(block)); ok {
+	} else if _, ok := LIRSObject.orderedList.Get(block); ok {
 		// hit, block is HIR resident
 		LIRSObject.handleHIRResidentBlock(block)
 	} else {
 		// miss, blok is HIR non resident
-		LIRSObject.HandleHIRNonResidentBlock(block)
+		LIRSObject.handleHIRNonResidentBlock(block)
 	}
 	return nil
 }
@@ -156,11 +106,7 @@ func (LIRSObject *LIRS) handleLIRBlock(block int) (err error) {
 	if !ok {
 		return errors.New("orderedStack is empty")
 	}
-	keyInInt, err := strconv.Atoi(key.(string))
-	if err != nil {
-		return err
-	}
-	if keyInInt == block {
+	if key.(int) == block {
 		// block is in LIR and at the bottom of the stack
 		// do stack pruning
 		LIRSObject.stackPrunning(false)
@@ -171,7 +117,7 @@ func (LIRSObject *LIRS) handleLIRBlock(block int) (err error) {
 
 func (LIRSObject *LIRS) handleHIRResidentBlock(block int) {
 	LIRSObject.hit += 1
-	if _, ok := LIRSObject.orderedStack.Get(strconv.Itoa(block)); ok {
+	if _, ok := LIRSObject.orderedStack.Get(block); ok {
 		// block is in stack, move to LIR
 		LIRSObject.makeLIR(block)
 		LIRSObject.removeFromList(block)
@@ -183,10 +129,10 @@ func (LIRSObject *LIRS) handleHIRResidentBlock(block int) {
 	LIRSObject.addToStack(block)
 }
 
-func (LIRSObject *LIRS) HandleHIRNonResidentBlock(block int) {
+func (LIRSObject *LIRS) handleHIRNonResidentBlock(block int) {
 	LIRSObject.miss += 1
 	LIRSObject.addToList(block)
-	if _, ok := LIRSObject.orderedStack.Get(strconv.Itoa(block)); ok {
+	if _, ok := LIRSObject.orderedStack.Get(block); ok {
 		// block is in stack, move to LIR
 		LIRSObject.makeLIR(block)
 		LIRSObject.removeFromList(block)
@@ -198,37 +144,22 @@ func (LIRSObject *LIRS) HandleHIRNonResidentBlock(block int) {
 }
 
 func (LIRSObject *LIRS) addToStack(block int) {
-	key := strconv.Itoa(block)
-	if _, ok := LIRSObject.orderedStack.Get(key); ok {
-		LIRSObject.orderedStack.MoveLast(key)
+	if _, ok := LIRSObject.orderedStack.Get(block); ok {
+		LIRSObject.orderedStack.MoveLast(block)
 		return
 	}
-	LIRSObject.orderedStack.Set(key, 1)
+	LIRSObject.orderedStack.Set(block, 1)
 }
 
-// list
-// front queue (paper) = last ordered list
-// end queue (paper) = first ordered list
-// func (LIRSObject *LIRS) addToListToLastIndex(block int) {
-// 	key := strconv.Itoa(block)
-// 	if LIRSObject.orderedList.Len() == LIRSObject.HIRSize {
-// 		LIRSObject.orderedList.PopLast()
-// 	}
-// 	LIRSObject.orderedList.Set(key, 1)
-// 	LIRSObject.orderedList.MoveFirst(key)
-// }
-
 func (LIRSObject *LIRS) addToList(block int) {
-	key := strconv.Itoa(block)
 	if LIRSObject.orderedList.Len() == LIRSObject.HIRSize {
 		LIRSObject.orderedList.PopFirst()
 	}
-	LIRSObject.orderedList.Set(key, 1)
+	LIRSObject.orderedList.Set(block, 1)
 }
 
 func (LIRSObject *LIRS) removeFromList(block int) {
-	key := strconv.Itoa(block)
-	LIRSObject.orderedList.Delete(key)
+	LIRSObject.orderedList.Delete(block)
 }
 
 func (LIRSObject *LIRS) makeLIR(block int) {
@@ -247,23 +178,15 @@ func (LIRSObject *LIRS) stackPrunning(removeLIR bool) (err error) {
 	if !ok {
 		return errors.New("orderedStack is empty")
 	}
-	keyInInt, err := strconv.Atoi(key.(string))
-	if err != nil {
-		return err
-	}
 	if removeLIR {
-		LIRSObject.makeHIR(keyInInt)
+		LIRSObject.makeHIR(key.(int))
 		LIRSObject.orderedList.Set(key, 1)
 		LIRSObject.orderedList.MoveLast(key)
 	}
 
 	iter := LIRSObject.orderedStack.Iter()
 	for k, _, ok := iter.Next(); ok; k, _, ok = iter.Next() {
-		keyInInt, err := strconv.Atoi(k.(string))
-		if err != nil {
-			return err
-		}
-		if _, ok := LIRSObject.LIR[keyInInt]; ok {
+		if _, ok := LIRSObject.LIR[k]; ok {
 			break
 		}
 		LIRSObject.orderedStack.PopFirst()
