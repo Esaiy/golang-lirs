@@ -6,73 +6,131 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"sync"
+	"strings"
+	"time"
 
+	"github.com/esaiy/golang-lirs/lfu"
 	"github.com/esaiy/golang-lirs/lirs"
+	"github.com/esaiy/golang-lirs/lru"
+	"github.com/esaiy/golang-lirs/simulator"
 )
 
 func main() {
-	var filePath string
-	var cacheList []int
-	var wg sync.WaitGroup
+	var (
+		traces    []simulator.Trace = make([]simulator.Trace, 0)
+		simulator simulator.Simulator
+		timeStart time.Time
+		out       *os.File
+		fs        os.FileInfo
+		filePath  string
+		outPath   string
+		algorithm string
+		err       error
+		cacheList []int
+	)
 
-	if len(os.Args) < 3 {
-		fmt.Println("program [file] [cachesize]...")
+	if len(os.Args) < 4 {
+		fmt.Println("program [algorithm(LIRS|LRU|LFU)] [file] [trace size]...")
 		os.Exit(1)
 	}
 
-	filePath = os.Args[1]
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	algorithm = os.Args[1]
+
+	filePath = os.Args[2]
+	if fs, err = os.Stat(filePath); os.IsNotExist(err) {
 		fmt.Printf("%v does not exists\n", filePath)
 		os.Exit(1)
 	}
 
-	cacheList = checkCacheSize(os.Args[2:])
-
-	for i := 2; i < len(os.Args); i++ {
-		cacheSize, err := strconv.Atoi(os.Args[i])
-		if err != nil {
-			fmt.Printf("%v not an int\n", os.Args[i])
-			os.Exit(1)
-		}
-		wg.Add(1)
-		go lirs.LIRS(filePath, cacheSize, 1, &wg)
-		fmt.Println(filePath, cacheSize, cacheList)
+	cacheList, err = validateTraceSize(os.Args[3:])
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
 	}
-	wg.Wait()
+
+	traces, err = readFile(filePath)
+	if err != nil {
+		log.Fatalf("error reading file: %v", err)
+	}
+
+	outPath = fmt.Sprintf("%v_%v_%v.txt", time.Now().Unix(), algorithm, fs.Name())
+
+	out, err = os.Create(outPath)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	defer out.Close()
+
+	for _, cache := range cacheList {
+		switch strings.ToLower(algorithm) {
+		case "lirs":
+			simulator = lirs.NewLIRS(cache, 1)
+		case "lru":
+			simulator = lru.NewLRU(cache)
+		case "lfu":
+			simulator = lfu.NewLFU(cache)
+		default:
+			log.Fatal("algorithm not supported")
+		}
+
+		timeStart = time.Now()
+
+		for _, trace := range traces {
+			err = simulator.Get(trace)
+			if err != nil {
+				log.Fatal(err.Error())
+			}
+		}
+
+		simulator.PrintToFile(out, timeStart)
+	}
+	fmt.Println("Done")
 }
 
-func checkCacheSize(cacheSize []string) []int {
-	var cacheList []int
-	for _, size := range cacheSize {
-		cache, err := strconv.Atoi(size)
+func validateTraceSize(tracesize []string) (sizeList []int, err error) {
+	var (
+		cacheList []int
+		cache     int
+	)
+
+	for _, size := range tracesize {
+		cache, err = strconv.Atoi(size)
 		if err != nil {
-			fmt.Printf("%v not an int\n", size)
-			os.Exit(1)
+			return sizeList, err
 		}
 		cacheList = append(cacheList, cache)
-
 	}
-	return cacheList
+	return cacheList, nil
 }
 
-func readFile(i int, filePath string, wg *sync.WaitGroup) {
-	file, err := os.Open(filePath)
+func readFile(filePath string) (traces []simulator.Trace, err error) {
+	var (
+		file    *os.File
+		scanner *bufio.Scanner
+		row     []string
+		address int
+	)
+	file, err = os.Open(filePath)
 	if err != nil {
-		log.Fatal(err)
+		return traces, err
 	}
 	defer file.Close()
 
-	fWrite, err := os.Create(strconv.Itoa(i) + ".txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer fWrite.Close()
-
-	scanner := bufio.NewScanner(file)
+	scanner = bufio.NewScanner(file)
 
 	for scanner.Scan() {
-		fWrite.WriteString(scanner.Text() + "\n")
+		row = strings.Split(scanner.Text(), ",")
+		address, err = strconv.Atoi(row[0])
+		if err != nil {
+			return traces, err
+		}
+		traces = append(traces,
+			simulator.Trace{
+				Addr: address,
+				Op:   row[1],
+			},
+		)
 	}
-	wg.Done()
+
+	return traces, nil
 }
